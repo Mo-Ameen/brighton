@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Club Fee Collection</title>
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins&display=swap" rel="stylesheet">
+  <style>
+    body {
+      font-family: 'Poppins', sans-serif;
+      background: #f5f7fb;
+      margin: 0;
+      padding: 20px;
+    }
+
+    .container {
+      max-width: 1100px;
+      margin: auto;
+      background: #fff;
+      padding: 25px;
+      border-radius: 8px;
+      box-shadow: 0 0 15px rgba(0,0,0,0.05);
+    }
+
+    h1 {
+      text-align: center;
+      color: #333;
+      margin-bottom: 20px;
+    }
+
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 15px;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    select, button, input {
+      padding: 8px 14px;
+      font-size: 16px;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 15px;
+    }
+
+    th, td {
+      padding: 10px;
+      border: 1px solid #ddd;
+      text-align: center;
+    }
+
+    th {
+      background: #007bff;
+      color: white;
+    }
+
+    /* Fix for action header alignment */
+    th:last-child {
+      padding: 10px 0;
+    }
+
+    input.editable {
+      width: 100%;
+      border: none;
+      background: transparent;
+      font-family: inherit;
+      text-align: center;
+    }
+
+    input.editable:focus {
+      background: #fff4e6;
+      border: 1px solid #ffa500;
+    }
+
+    .action-buttons {
+      display: flex;
+      gap: 8px;
+      justify-content: center;
+      padding: 0 5px;
+    }
+
+    .action-buttons button {
+      padding: 4px 10px;
+      font-size: 14px;
+      border-radius: 5px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    .action-buttons .delete {
+      background-color: #dc3545;
+      color: white;
+      border: none;
+    }
+
+    .action-buttons .save {
+      background-color: #28a745;
+      color: white;
+      border: none;
+    }
+
+    .action-buttons .cancel {
+      background-color: #6c757d;
+      color: white;
+      border: none;
+    }
+
+    .add-member-form {
+      display: none;
+      margin-top: 15px;
+    }
+
+    .required::after {
+      content: "*";
+      color: red;
+      margin-left: 4px;
+    }
+
+    .total-row {
+      font-weight: bold;
+      background-color: #f8f9fa;
+    }
+
+    .total-row td {
+      border-top: 2px solid #333;
+    }
+  </style>
+</head>
+<body>
+<div class="container">
+  <h1>Club Fee Collection</h1>
+
+  <div class="controls">
+    <label for="yearSelect">Year:</label>
+    <select id="yearSelect"></select>
+
+    <label for="halfSelect">Half:</label>
+    <select id="halfSelect">
+      <option value="H1">First Half</option>
+      <option value="H2">Second Half</option>
+    </select>
+
+    <label for="statusFilter">Filter by Status:</label>
+    <select id="statusFilter">
+      <option value="all">All</option>
+      <option value="active">Active</option>
+      <option value="inactive">Inactive</option>
+    </select>
+
+    <button onclick="toggleAddForm()">Add New Member</button>
+   <!-- <button onclick="importFromPrevious()">Import From Previous</button> --> 
+  </div>
+
+  <form class="add-member-form" id="addForm" onsubmit="addMember(event)">
+    <input type="number" id="newId" placeholder="Member ID" required class="required"/>
+    <input id="newName" placeholder="Name" required class="required"/>
+    <select id="newStatus" required class="required">
+      <option value="">Select Status</option>
+      <option value="active">Active</option>
+      <option value="inactive">Inactive</option>
+    </select>
+    <input type="number" id="newAmount" placeholder="Amount" />
+    <input type="number" id="newPaid" placeholder="Paid" />
+    <input id="newComment" placeholder="Comment" />
+    <select id="newMethod">
+      <option value="PhonePay">Phone Pay</option>
+      <option value="GooglePay">Google Pay</option>
+      <option value="Liquid">Liquid</option>
+    </select>
+    <button type="submit">Add</button>
+  </form>
+
+  <table>
+    <thead>
+    <tr>
+      <th>#</th>
+      <th>Member ID</th>
+      <th>Name</th>
+      <th>Status</th>
+      <th>Amount</th>
+      <th>Paid</th>
+      <th>Due</th>
+      <th>Method</th>
+      <th>Comment</th>
+      <th>Action</th>
+    </tr>
+    </thead>
+    <tbody id="tableBody"></tbody>
+    <tfoot>
+      <tr class="total-row">
+        <td colspan="3">Total</td>
+        <td id="totalAmount">0</td>
+        <td id="totalPaid">0</td>
+        <td id="totalDue">0</td>
+        <td colspan="4"></td>
+      </tr>
+    </tfoot>
+  </table>
+</div>
+
+<script>
+  const firebaseConfig = {
+    apiKey: "AIzaSyDummyKey",
+    authDomain: "myprojects-moameen.firebaseapp.com",
+    projectId: "myprojects-moameen",
+  };
+  firebase.initializeApp(firebaseConfig);
+  const db = firebase.firestore();
+  const collection = "clubfeecollection";
+
+  const yearSelect = document.getElementById("yearSelect");
+  const halfSelect = document.getElementById("halfSelect");
+  const statusFilter = document.getElementById("statusFilter");
+  const tableBody = document.getElementById("tableBody");
+  const totalAmount = document.getElementById("totalAmount");
+  const totalPaid = document.getElementById("totalPaid");
+  const totalDue = document.getElementById("totalDue");
+
+  function loadYears() {
+    const thisYear = new Date().getFullYear();
+    yearSelect.innerHTML = "";
+    for (let y = 2024; y <= thisYear + 1; y++) {
+      const opt = document.createElement("option");
+      opt.value = y;
+      opt.textContent = y;
+      if (y === thisYear) opt.selected = true;
+      yearSelect.appendChild(opt);
+    }
+  }
+
+  function toggleAddForm() {
+    const form = document.getElementById("addForm");
+    form.style.display = form.style.display === "block" ? "none" : "block";
+  }
+
+  async function loadMembers() {
+    const year = yearSelect.value;
+    const half = halfSelect.value;
+    const filter = statusFilter.value;
+    tableBody.innerHTML = "";
+
+    const snapshot = await db.collection(collection)
+      .where("year", "==", year)
+      .where("half", "==", half)
+      .get();
+
+    let rowNumber = 1;
+    let sumAmount = 0;
+    let sumPaid = 0;
+    let sumDue = 0;
+    
+    snapshot.forEach((doc) => {
+      const d = doc.data();
+      if (filter !== "all" && d.status !== filter) return;
+
+      const amount = Number(d.amount || 0);
+      const paid = Number(d.paid || 0);
+      const due = amount - paid;
+
+      sumAmount += amount;
+      sumPaid += paid;
+      sumDue += due;
+
+      const row = document.createElement("tr");
+      row.innerHTML = `
+        <td>${rowNumber++}</td>
+        <td>${d.memberId || ''}</td>
+        <td contenteditable="true" oninput="flagEdit('${doc.id}')">${d.name}</td>
+        <td>
+          <select onchange="flagEdit('${doc.id}')">
+            <option value="active" ${d.status === 'active' ? 'selected' : ''}>Active</option>
+            <option value="inactive" ${d.status === 'inactive' ? 'selected' : ''}>Inactive</option>
+          </select>
+        </td>
+        <td><input type="number" class="editable" value="${amount}" oninput="flagEdit('${doc.id}')" /></td>
+        <td><input type="number" class="editable" value="${paid}" oninput="flagEdit('${doc.id}')" /></td>
+        <td class="due">${due}</td>
+        <td>
+          <select onchange="flagEdit('${doc.id}')">
+            <option value="PhonePay" ${d.method === 'PhonePay' ? 'selected' : ''}>Phone Pay</option>
+            <option value="GooglePay" ${d.method === 'GooglePay' ? 'selected' : ''}>Google Pay</option>
+            <option value="Liquid" ${d.method === 'Liquid' ? 'selected' : ''}>Liquid</option>
+          </select>
+        </td>
+        <td contenteditable="true" oninput="flagEdit('${doc.id}')">${d.comment || ''}</td>
+        <td class="action-buttons" data-id="${doc.id}">
+          <button class="delete" onclick="deleteMember('${doc.id}')">Delete</button>
+        </td>
+      `;
+      tableBody.appendChild(row);
+    });
+
+    // Update totals
+    totalAmount.textContent = sumAmount;
+    totalPaid.textContent = sumPaid;
+    totalDue.textContent = sumDue;
+  }
+
+  async function importFromPrevious() {
+    const currentYear = parseInt(yearSelect.value);
+    const half = halfSelect.value;
+    const previousYear = currentYear - 1;
+
+    if (confirm(`Import members from ${previousYear} ${half}?`)) {
+      const snapshot = await db.collection(collection)
+        .where("year", "==", previousYear)
+        .where("half", "==", half)
+        .get();
+
+      const currentMembers = await db.collection(collection)
+        .where("year", "==", currentYear)
+        .where("half", "==", half)
+        .get();
+
+      // Get existing member IDs to avoid duplicates
+      const existingIds = new Set();
+      currentMembers.forEach(doc => {
+        const data = doc.data();
+        if (data.memberId) existingIds.add(data.memberId);
+      });
+
+      let importedCount = 0;
+      
+      for (const doc of snapshot.docs) {
+        const data = doc.data();
+        
+        // Skip if member already exists
+        if (data.memberId && existingIds.has(data.memberId)) continue;
+
+        // Import only name, status, and amount (reset paid to 0)
+        await db.collection(collection).add({
+          memberId: data.memberId,
+          name: data.name,
+          status: data.status,
+          amount: data.amount || 0,
+          paid: 0,
+          method: data.method || 'PhonePay',
+          comment: data.comment || '',
+          year: currentYear,
+          half: half
+        });
+        
+        importedCount++;
+      }
+
+      alert(`Successfully imported ${importedCount} members from ${previousYear} ${half}`);
+      loadMembers();
+    }
+  }
+
+  async function addMember(e) {
+    e.preventDefault();
+    const memberId = document.getElementById("newId").value;
+    const name = document.getElementById("newName").value;
+    const status = document.getElementById("newStatus").value;
+    
+    // Check if member ID already exists
+    const existing = await db.collection(collection)
+      .where("year", "==", yearSelect.value)
+      .where("half", "==", halfSelect.value)
+      .where("memberId", "==", memberId)
+      .get();
+
+    if (!existing.empty) {
+      alert("Member with this ID already exists!");
+      return;
+    }
+
+    const data = {
+      memberId: memberId,
+      name: name,
+      status: status,
+      amount: Number(document.getElementById("newAmount").value || 0),
+      paid: Number(document.getElementById("newPaid").value || 0),
+      comment: document.getElementById("newComment").value,
+      method: document.getElementById("newMethod").value,
+      year: yearSelect.value,
+      half: halfSelect.value
+    };
+    
+    await db.collection(collection).add(data);
+    e.target.reset();
+    loadMembers();
+  }
+
+  function flagEdit(id) {
+    const row = document.querySelector(`.action-buttons[data-id="${id}"]`);
+    if (row && !row.querySelector(".save")) {
+      row.innerHTML = `
+        <button class="save" onclick="saveChanges('${id}', this)">Save</button>
+        <button class="cancel" onclick="cancelChanges()">Cancel</button>
+        <button class="delete" onclick="deleteMember('${id}')">Delete</button>
+      `;
+    }
+  }
+
+  function cancelChanges() {
+    if (confirm("Discard unsaved changes?")) loadMembers();
+  }
+
+  async function saveChanges(id, btn) {
+    const tr = btn.closest("tr");
+    const tds = tr.querySelectorAll("td");
+
+    const memberId = tds[1].textContent.trim();
+    const name = tds[2].innerText.trim();
+    const status = tds[3].querySelector("select").value;
+    const amount = Number(tds[4].querySelector("input").value || 0);
+    const paid = Number(tds[5].querySelector("input").value || 0);
+    const due = amount - paid;
+    const method = tds[7].querySelector("select").value;
+    const comment = tds[8].innerText.trim();
+
+    tds[6].textContent = due;
+
+    const updated = { memberId, name, status, amount, paid, method, comment };
+    await db.collection(collection).doc(id).update(updated);
+    loadMembers();
+  }
+
+  function deleteMember(id) {
+    if (confirm("Confirm delete this member?")) {
+      db.collection(collection).doc(id).delete().then(loadMembers);
+    }
+  }
+
+  yearSelect.addEventListener("change", loadMembers);
+  halfSelect.addEventListener("change", loadMembers);
+  statusFilter.addEventListener("change", loadMembers);
+
+  loadYears();
+  loadMembers();
+</script>
+</body>
+</html>
